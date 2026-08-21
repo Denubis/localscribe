@@ -1,0 +1,88 @@
+[project]
+name = "localscribe"
+version = "0.1.0"
+description = "Local speaker-attributed transcription: FLAC meeting recording to who-said-what-when"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+authors = [
+    { name = "Brian Ballsun-Stanton", email = "denubisx@noreply.github.com" }
+]
+keywords = ["asr", "diarization", "speech-to-text", "transcription"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+# Capped below 3.14: as of 2026-06 there are no cp314 CUDA torch wheels, so the
+# resolver must not consider 3.14 or it fails demanding wheels that don't exist.
+requires-python = ">=3.13,<3.14"
+# Recording and sending need only ffmpeg, so the base install stays light enough
+# for a laptop. The model stack is the `gpu` extra: a machine that captures audio
+# and hands it to a GPU workstation should not download a CUDA wheel it will never load.
+dependencies = [
+    "typer>=0.26.5",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "torch",
+    "torchaudio",
+    "pyannote.audio>=4.0",
+    "nemo-toolkit[asr]",
+    "soundfile>=0.12",
+]
+
+# scribe / scribe-enrol / scribe-watch need [gpu] and say so, via
+# runtime.require_gpu_extra, rather than dying in a lazy import.
+# scribe-record / scribe-send run anywhere ffmpeg does.
+[project.scripts]
+scribe = "localscribe.cli:app"
+scribe-enrol = "localscribe.cli:enrol_app"
+scribe-record = "localscribe.cli:record_app"
+scribe-send = "localscribe.cli:send_app"
+scribe-watch = "localscribe.cli:watch_app"
+
+[project.urls]
+Homepage = "https://github.com/Denubis/localscribe"
+Repository = "https://github.com/Denubis/localscribe"
+Issues = "https://github.com/Denubis/localscribe/issues"
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.155.1",
+    "pytest>=9.0.3",
+    "ruff>=0.15.15",
+    "ty>=0.0.42",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+# torch / torchaudio come from the CUDA wheel index used by the known-working
+# Linux GPU environment. `explicit = true` keeps every other dependency on PyPI.
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+torchaudio = [{ index = "pytorch-cu128" }]
+
+[tool.uv.build-backend]
+source-include = ["install.sh", "uv.lock", "docs/**"]

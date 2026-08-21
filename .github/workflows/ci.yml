@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.0"
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install system test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg rsync shellcheck
+
+      - name: Verify lockfile
+        run: uv lock --check
+
+      - name: Install the light development environment
+        run: uv sync --frozen
+
+      - name: Run tests
+        run: uv run --frozen pytest
+
+      - name: Run lint
+        run: uv run --frozen ruff check .
+
+      - name: Lint the installer
+        run: shellcheck install.sh
+
+      - name: Run type checking
+        run: uv run --frozen ty check
+
+      - name: Build distributions
+        run: uv build --no-sources
