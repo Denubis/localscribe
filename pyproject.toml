@@ -75,6 +75,10 @@ addopts = "-ra"
 
 # torch / torchaudio come from the CUDA wheel index used by the known-working
 # Linux GPU environment. `explicit = true` keeps every other dependency on PyPI.
+[tool.uv]
+# Keep resolution independent of any contributor's user-level uv configuration.
+exclude-newer = "14 days"
+
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
