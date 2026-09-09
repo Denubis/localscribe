@@ -118,6 +118,11 @@ record_app = typer.Typer(
 )
 
 
+def _interactive_input() -> bool:
+    """Whether this invocation has a terminal for the Enter rollover control."""
+    return sys.stdin.isatty()
+
+
 @record_app.command()
 def record(
     output: Annotated[
@@ -142,12 +147,13 @@ def record(
         bool, typer.Option("--no-transcribe", help="Keep only the raw FLAC; skip transcription.")
     ] = False,
 ) -> None:
-    """Record a meeting to FLAC until Ctrl-C, then transcribe it to a .md transcript.
+    """Record a meeting; Enter starts a new part, Ctrl-C finishes recording.
 
     Asks remote-or-in-person at the start unless --remote/--in-person is given.
     Remote taps your mic plus the system output (the call); in-person records the
     mic alone, so stray desktop audio cannot leak in as a phantom speaker. Pass
-    --no-transcribe to stop at the FLAC.
+    --no-transcribe to stop at the FLAC. In a terminal, Enter finalises the current
+    part for background transcription while recording continues in a new file.
     """
     from datetime import datetime
 
@@ -165,9 +171,23 @@ def record(
     try:
         is_remote = resolve_record_mode(remote=remote, in_person=in_person, prompt_answer=answer)
         chosen_mic = resolve_mic(mic)
-        mode_label = "remote (mic + system, stereo)" if is_remote else "in-person (mic only, mono)"
+        channels = "mono" if mono else "stereo"
+        mode_label = (
+            f"remote (mic + system, {channels})" if is_remote else "in-person (mic only, mono)"
+        )
         typer.echo(f"mic:  {chosen_mic}")
         typer.echo(f"mode: {mode_label}")
+        if _interactive_input():
+            from .record_session import record_interactively
+
+            typer.echo(f"recording -> {target}   (Enter: next file; Ctrl-C: stop recording)")
+            code = record_interactively(
+                target, mic=chosen_mic, mono=mono, remote=is_remote,
+                no_transcribe=no_transcribe, echo=typer.echo,
+            )
+            if code:
+                raise typer.Exit(code=code)
+            return
         typer.echo(f"recording -> {target}   (Ctrl-C to stop)")
         capture(target, mic=chosen_mic, mono=mono, remote=is_remote)
     except LocalscribeError as exc:
@@ -185,6 +205,7 @@ def record(
     except LocalscribeError as exc:
         typer.echo(f"not transcribing: {exc}")
         typer.echo(f"the recording is safe at {target}")
+        typer.echo(f"  after installing the model stack locally, retry: scribe {target}")
         typer.echo("  to transcribe it on the GPU box: scribe-send " + str(target))
         raise typer.Exit(code=3) from exc
     configure_cache()
@@ -282,7 +303,10 @@ def send(
                 remote=remote, in_person=in_person, prompt_answer=answer
             )
             chosen_mic = resolve_mic(mic)
-            mode = "remote (mic + system, stereo)" if is_remote else "in-person (mic only, mono)"
+            channels = "mono" if mono else "stereo"
+            mode = (
+                f"remote (mic + system, {channels})" if is_remote else "in-person (mic only, mono)"
+            )
             typer.echo(f"mic:  {chosen_mic}")
             typer.echo(f"mode: {mode}")
             typer.echo(f"recording -> {target}   (Ctrl-C to stop)")
@@ -334,6 +358,11 @@ def watch_command(
     recording side needs no configuration at all. Run one of these per project
     folder and use --match to keep them out of each other's way.
     """
+    target = (destination or Path.cwd()).resolve()
+    if destination is not None and not target.is_dir():
+        typer.echo(f"error: destination directory does not exist: {target}")
+        raise typer.Exit(code=2)
+
     try:
         require_gpu_extra()
     except LocalscribeError as exc:
@@ -345,11 +374,6 @@ def watch_command(
     from .inbox import inbox_dir
     from .pipeline import transcribe_recording
     from .watch import watch
-
-    target = (destination or Path.cwd()).resolve()
-    if destination is not None and not target.is_dir():
-        typer.echo(f"error: destination directory does not exist: {target}")
-        raise typer.Exit(code=2)
 
     def transcribe(path: Path) -> None:
         transcribe_recording(

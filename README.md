@@ -97,6 +97,24 @@ Record a remote meeting, capturing the microphone and system output:
 scribe-record recordings/meeting.flac --remote
 ```
 
+The microphone is selected once at startup and printed before recording: an
+explicit `--mic` wins, then the current USB default, then any USB source, then
+the system default. Connect the intended microphone before starting; the chosen
+source stays fixed for the whole recording.
+
+In a terminal, press Enter to finish the current file and transcribe it in the
+background while recording continues into `meeting-part002.flac`,
+`meeting-part003.flac`, and so on. The microphone stays open across file
+changes. Background jobs run one at a time, in a fresh process each, sharing the
+GPU lock with `scribe-watch`. Press Ctrl-C once to stop recording, finish the
+last file, and wait for queued transcripts; press Ctrl-C again to cancel the
+remaining jobs and keep the FLACs for a later `scribe`. Without a terminal, the
+command records one file and transcribes it when stopped. `--no-transcribe`
+keeps the same Enter and Ctrl-C controls and produces only the numbered FLACs.
+
+If a transcription fails, the recording is kept and the command prints the error
+and the `scribe` command to retry it.
+
 Enrol a speaker from a clean single-speaker clip:
 
 ```console
