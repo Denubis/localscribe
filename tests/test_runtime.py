@@ -57,3 +57,22 @@ def test_default_cache_uses_the_user_cache_directory(monkeypatch, tmp_path) -> N
     runtime.configure_cache()
 
     assert Path(runtime.os.environ["HF_HOME"]) == tmp_path / ".cache" / "huggingface"
+
+
+@pytest.mark.parametrize(
+    ("key", "ambient", "disabled"),
+    [
+        ("PYANNOTE_METRICS_ENABLED", "true", "false"),
+        ("HF_HUB_DISABLE_TELEMETRY", "0", "1"),
+        ("OTEL_SDK_DISABLED", "false", "true"),
+        ("WANDB_MODE", "online", "disabled"),
+    ],
+)
+def test_runtime_disables_telemetry_despite_ambient_opt_in(
+    monkeypatch, key, ambient, disabled
+) -> None:
+    monkeypatch.setenv(key, ambient)
+
+    runtime.quiet_third_party()
+
+    assert runtime.os.environ[key] == disabled

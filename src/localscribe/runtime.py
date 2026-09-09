@@ -42,17 +42,21 @@ def configure_cache() -> None:
     logger.debug("HF_HOME set to %s", hf_home)
 
 
-#: Set before the heavy imports, because these libraries read the environment at
-#: import time. Every entry silences startup chatter only; none of it changes what
-#: the models do. ``setdefault`` throughout, so an explicit value from the caller's
-#: shell always wins.
-_QUIET_ENV = {
-    # NeMo initialises OpenTelemetry, which announces "No exporters were provided".
+#: Recording metadata must remain local too. These override ambient opt-ins and
+#: must be set before imports; pyannote enables usage/duration metrics by default.
+_LOCAL_ENV = {
+    "PYANNOTE_METRICS_ENABLED": "false",
+    "HF_HUB_DISABLE_TELEMETRY": "1",
     "OTEL_SDK_DISABLED": "true",
+    "WANDB_MODE": "disabled",
+}
+
+#: Cosmetic settings respect explicit caller preferences. Libraries read these
+#: at import time too, so set them before the heavy imports.
+_QUIET_ENV = {
     # nemo-toolkit depends on wandb, which introduces itself on import. Nothing
     # here ever logs a run.
     "WANDB_SILENT": "true",
-    "WANDB_MODE": "disabled",
     # Otherwise every fork after a tokenizer is used prints a parallelism warning.
     "TOKENIZERS_PARALLELISM": "false",
     # In case a transitive import drags TensorFlow in.
@@ -90,13 +94,14 @@ class _BelowError(logging.Filter):
 
 
 def quiet_third_party() -> None:
-    """Silence third-party startup noise so progress stays readable.
+    """Disable third-party telemetry and keep startup progress readable.
 
-    Call before the heavy imports. This suppresses *reporting*, never a failure:
+    Call before the heavy imports. The logging filters suppress noise, never a failure:
     everything raised as an error still surfaces, and localscribe's own progress
     lines are untouched. The pydub ``SyntaxWarning`` filter matters only on the
     first run after an install, when Python compiles the bytecode.
     """
+    os.environ.update(_LOCAL_ENV)
     for key, value in _QUIET_ENV.items():
         os.environ.setdefault(key, value)
 

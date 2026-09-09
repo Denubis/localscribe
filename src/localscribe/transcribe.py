@@ -42,12 +42,19 @@ def transcribe(recording: Path) -> list[Word]:
     """Return time-stamped words for ``recording`` (mono 16 kHz)."""
     try:
         nemo_asr = import_module("nemo.collections.asr")
+        open_dict = import_module("omegaconf").open_dict
     except Exception as exc:  # noqa: BLE001 - boundary: wrap import failure
         raise TranscriptionError(f"NeMo ASR is unavailable: {exc}") from exc
 
     try:
         model = nemo_asr.models.ASRModel.from_pretrained(model_name=MODEL)
         model.change_attention_model(*_LOCAL_ATTENTION)
+        # Reusing the TDT CUDA graph across long windows caused an illegal-memory
+        # abort on the RTX 5080. Keep eager decoding in the persistent config:
+        # timestamps=True can rebuild the decoder, undoing a runtime-only disable.
+        with open_dict(model.cfg.decoding.greedy):
+            model.cfg.decoding.greedy.use_cuda_graph_decoder = False
+        model.change_decoding_strategy(model.cfg.decoding, verbose=False)
     except Exception as exc:  # noqa: BLE001 - boundary: wrap load failure
         raise TranscriptionError(f"failed to load transcription model {MODEL}: {exc}") from exc
 

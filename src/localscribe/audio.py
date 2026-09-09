@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import wave
 from pathlib import Path
 
 from .errors import AudioError
@@ -55,13 +56,21 @@ def split_into_windows(wav: Path, window_seconds: int) -> list[tuple[float, Path
     temp directory; the caller must remove them (``shutil.rmtree`` on the parent).
     A file shorter than one window yields a single chunk at offset 0.
     """
+    # Packet-copy segmentation rounds cuts to input packet boundaries. Frame the
+    # normalized PCM into exact seconds before segmenting, so reported offsets
+    # agree with the samples and no chunk exceeds its integer-second window.
+    try:
+        with wave.open(str(wav), "rb") as source:
+            sample_rate = source.getframerate()
+    except (OSError, EOFError, wave.Error) as exc:
+        raise AudioError(f"could not read PCM WAV {wav}: {exc}") from exc
     chunk_dir = Path(tempfile.mkdtemp(prefix="localscribe-chunks-"))
     pattern = str(chunk_dir / "chunk_%05d.wav")
     command = [
         "ffmpeg", "-y", "-v", "error",
         "-i", str(wav),
         "-f", "segment", "-segment_time", str(window_seconds),
-        "-c", "copy",
+        "-af", f"asetnsamples=n={sample_rate}:p=0", "-c:a", "pcm_s16le",
         pattern,
     ]
     try:
