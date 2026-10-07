@@ -14,13 +14,31 @@ from .models import AttributedSegment, SpeakerTurn, Word
 #: turns at all). Keeps the transcript whole rather than discarding words.
 UNKNOWN_SPEAKER = "UNKNOWN"
 
+#: A silence at least this long after the end of a sentence starts a new segment
+#: even when the speaker has not changed: a paragraph break, with its own timestamp.
+PAUSE_SECONDS = 1.0
 
-def reconcile(words: list[Word], turns: list[SpeakerTurn]) -> list[AttributedSegment]:
+#: Mid-sentence, a silence has to be this long before it breaks the paragraph: a
+#: hesitation, or a moment of dropped audio, should not split a sentence in two.
+HESITATION_SECONDS = 2.5
+
+_SENTENCE_END = (".", "?", "!")
+
+
+def reconcile(
+    words: list[Word],
+    turns: list[SpeakerTurn],
+    *,
+    pause_seconds: float = PAUSE_SECONDS,
+    hesitation_seconds: float = HESITATION_SECONDS,
+) -> list[AttributedSegment]:
     """Attribute each word to a speaker and merge consecutive same-speaker words.
 
     Words are attributed in order, then collapsed into runs: a maximal sequence of
-    consecutive words sharing a speaker becomes one segment. Text is joined once per
-    run, so a long single-speaker stretch stays O(n) rather than O(n^2).
+    consecutive words sharing a speaker becomes one segment, unless a pause
+    between neighbours is long enough to break it (``pause_seconds`` after a
+    sentence end, ``hesitation_seconds`` otherwise). Text is joined once per run,
+    so a long single-speaker stretch stays O(n) rather than O(n^2).
     """
     if not words:
         return []
@@ -30,7 +48,9 @@ def reconcile(words: list[Word], turns: list[SpeakerTurn]) -> list[AttributedSeg
     segments: list[AttributedSegment] = []
     run = [attributed[0]]
     for word, speaker in attributed[1:]:
-        if speaker == run[-1][1]:
+        previous = run[-1][0]
+        limit = pause_seconds if previous.text.endswith(_SENTENCE_END) else hesitation_seconds
+        if speaker == run[-1][1] and word.start - previous.end < limit:
             run.append((word, speaker))
         else:
             segments.append(_segment(run))

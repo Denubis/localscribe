@@ -36,8 +36,10 @@ The current supported and tested environment is:
 - an NVIDIA CUDA GPU for transcription.
 
 An RTX 4090 with 24 GB VRAM is the known-working reference. LocalScribe has not
-established a minimum GPU specification. ASR is processed in 20-minute windows
-to bound VRAM use on long recordings.
+established a minimum GPU specification. ASR runs twice over windows cut at
+pauses, 10 minutes and 30 seconds long, to bound VRAM use and so that speech the
+model skips in one pass is caught by the other. A pause of a second or more
+starts a new paragraph with its own timestamp.
 
 ## Install
 
