@@ -48,7 +48,8 @@ constraints="$(mktemp -t localscribe-gpu-constraints.XXXXXX.txt)"
 trap 'rm -f "$constraints"' EXIT
 
 echo "exporting the locked resolution ..."
-uv export --extra gpu --no-dev --no-emit-project --no-hashes \
+# Export the committed answer, regardless of machine-wide resolver settings.
+uv export --frozen --quiet --extra gpu --no-dev --no-emit-project --no-hashes \
   --format requirements-txt -o "$constraints" || exit 1
 
 # The pytorch index has to be named on the command line, and naming a second

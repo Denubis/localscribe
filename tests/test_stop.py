@@ -29,10 +29,12 @@ import pytest
 
 from localscribe.capture import (
     build_capture_command,
+    capture,
     ensure_has_audio,
     spawn_capture,
     stop_gracefully,
 )
+from localscribe.errors import CaptureError
 
 
 def _tone_capture(target: Path, *, nostdin: bool = False) -> subprocess.Popen[str]:
@@ -52,6 +54,62 @@ class TestCaptureCommand:
         # With -nostdin, ffmpeg ignores `q` and can only be signalled, which is
         # what destroyed the 2026-08-01 recording.
         assert "-nostdin" not in build_capture_command("MIC", "MON", Path("/out/m.flac"))
+
+    @pytest.mark.parametrize("remote", [False, True])
+    def test_existing_output_is_refused_without_waiting_for_stdin(
+        self, tmp_path: Path, remote: bool
+    ) -> None:
+        target = tmp_path / "existing.flac"
+        original = b"previous recording must survive"
+        target.write_bytes(original)
+        command = build_capture_command("MIC", "MON" if remote else None, target)
+        # Keep the generated graph/output options, substituting synthetic audio
+        # only at the hardware input boundary. stdin stays open as in capture().
+        command = [
+            "lavfi" if arg == "pulse" else
+            "sine=frequency=440:duration=0.1" if arg in {"MIC", "MON"} else arg
+            for arg in command
+        ]
+        proc = spawn_capture(command)
+        try:
+            proc.wait(timeout=3)
+            # ffmpeg 8 can report refusal with exit 0; the observable contract
+            # here is prompt-free refusal and preservation, not its exit status.
+            assert proc.stderr is not None
+            assert "already exists" in proc.stderr.read()
+            assert target.read_bytes() == original
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+    @pytest.mark.parametrize("remote", [False, True])
+    def test_output_created_during_startup_is_not_reported_as_a_new_recording(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote: bool
+    ) -> None:
+        target = tmp_path / "raced.flac"
+        previous_audio: list[bytes] = []
+
+        def spawn_after_output_appears(command: list[str]) -> subprocess.Popen[str]:
+            # Another writer creates valid audio after capture's preflight check.
+            subprocess.run(
+                ["ffmpeg", "-hide_banner", "-v", "error", "-nostdin", "-f", "lavfi",
+                 "-i", "sine=duration=0.1", str(target)],
+                check=True,
+            )
+            previous_audio.append(target.read_bytes())
+            command = [
+                "lavfi" if arg == "pulse" else
+                "sine=duration=0.1" if arg in {"MIC", "MON.monitor"} else arg
+                for arg in command
+            ]
+            return spawn_capture(command)
+
+        monkeypatch.setattr("localscribe.capture.spawn_capture", spawn_after_output_appears)
+        monkeypatch.setattr("localscribe.capture._resolve_default", lambda node: "MON")
+        with pytest.raises(CaptureError, match="already exists"):
+            capture(target, mic="MIC", remote=remote)
+        assert target.read_bytes() == previous_audio[0]
 
 
 class TestSpawnCapture:

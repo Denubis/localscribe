@@ -141,7 +141,8 @@ def build_capture_command(
     # 0-byte file. stdin is a pipe, not the terminal, so ffmpeg cannot eat the
     # user's keystrokes.
     return [
-        "ffmpeg", "-hide_banner",
+        # stdin is reserved for stopping: never wait there for an overwrite answer.
+        "ffmpeg", "-hide_banner", "-n",
         *inputs,
         "-filter_complex", graph,
         "-map", "[out]", "-c:a", "flac",
@@ -432,9 +433,11 @@ def capture(
     ``remote=True`` also taps the default sink's monitor for the far end of a call
     (stereo, or ``mono`` to mix); ``remote=False`` records the mic alone, mono, for
     an in-person meeting. The sink monitor is resolved at call time so switching the
-    default output between runs still works. Press Ctrl-C to stop: the SIGINT reaches
-    ffmpeg, which finalises the FLAC cleanly.
+    default output between runs still works. Press Ctrl-C to stop: the parent asks
+    ffmpeg to quit through stdin and finalise the FLAC cleanly.
     """
+    if output.exists():
+        raise CaptureError(f"recording output already exists: {output}; choose a new filename")
     mic_node = resolve_mic(mic)
     monitor_node = _resolve_default("@DEFAULT_AUDIO_SINK@") + ".monitor" if remote else None
     command = build_capture_command(mic_node, monitor_node, output, mono=mono)
@@ -444,11 +447,13 @@ def capture(
     tracker = SilenceTracker(mic_node)
     recent: deque[str] = deque(maxlen=20)  # keep a tail for a useful message if ffmpeg dies
     stopped_by_user = False
+    output_failed = False
     # iter(readline, "") reads line-by-line with no read-ahead, so a silence_start
     # surfaces as soon as ffmpeg emits it rather than waiting for a buffer to fill.
     try:
         for line in iter(proc.stderr.readline, ""):
             recent.append(line.rstrip())
+            output_failed = output_failed or "Error opening output file " in line
             warning = tracker.observe(line)
             if warning is not None:
                 print(warning, file=sys.stderr, flush=True)
@@ -464,10 +469,17 @@ def capture(
             request_stop(proc)
             for line in iter(proc.stderr.readline, ""):
                 recent.append(line.rstrip())
+                output_failed = output_failed or "Error opening output file " in line
         finally:
             watchdog.cancel()
     finally:
         proc.wait()
+
+    # ffmpeg 8 reports an existing output with exit 0 under -n. The file may have
+    # appeared after our preflight check, so its playable audio is not evidence
+    # that this capture succeeded. Preserve it and report the output refusal.
+    if output_failed:
+        raise CaptureError("ffmpeg could not write the recording:\n" + "\n".join(recent))
 
     # A non-zero exit we did not ask for (e.g. the mic could not be opened) used to
     # vanish; surface it with the tail of ffmpeg's own diagnostics.

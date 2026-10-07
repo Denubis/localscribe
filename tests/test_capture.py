@@ -18,6 +18,7 @@ from localscribe.capture import (
     SilenceEvent,
     SilenceTracker,
     build_capture_command,
+    capture,
     choose_mic,
     default_capture_path,
     parse_default_node,
@@ -266,3 +267,18 @@ def test_build_capture_command_mic_only_carries_silence_guard() -> None:
     cmd = build_capture_command("MIC", None, Path("/o.flac"))
     graph = cmd[cmd.index("-filter_complex") + 1]
     assert "silencedetect=noise=-50dB:d=20" in graph
+
+
+def test_capture_refuses_existing_output_before_opening_devices(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "existing.flac"
+    target.write_bytes(b"previous recording")
+
+    def unexpected_resolution(explicit: str | None) -> str:
+        pytest.fail("existing output must be refused before resolving devices")
+
+    monkeypatch.setattr("localscribe.capture.resolve_mic", unexpected_resolution)
+    with pytest.raises(CaptureError, match="already exists"):
+        capture(target)
+    assert target.read_bytes() == b"previous recording"
